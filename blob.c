@@ -6,7 +6,7 @@
 #include <signal.h>
 #include <errno.h>
 
-#define PROMPT ": "
+const char *PROMPT = ": ";
 
 void *MALLOC(size_t s)
 {
@@ -39,6 +39,11 @@ struct line {
 	struct line *prev;
 };
 
+/* Set to 1 by the signal handler if (ctrl+c) is hit. This stops the insertion loop.
+ * Note: sig_atomic_t (despite it's name) is not atomic.
+ */
+sig_atomic_t stop_insertion;
+
 void usage()
 {
         (void) fprintf(stderr,
@@ -63,6 +68,7 @@ void charray_to_line(struct line *dest, char *src)
 {
 	struct character *chars;
 	struct character *idx;
+
 	chars = ALLOC_LL(struct character *);
 	idx = chars;
 
@@ -117,23 +123,14 @@ char *lines_to_charray(struct line *line)
 FILE *create_empty_file(const char *fname)
 {
 	FILE *create_file;
-	FILE *read_file;
 
-	create_file = fopen(fname, "w");
+	create_file = fopen(fname, "w+");
 	if (create_file == NULL) {
 		perror("ed: create_empty_file");
 		exit(EXIT_FAILURE);
 	}
 
-	(void) fclose(create_file);
-
-	read_file = fopen(fname, "r");
-	if (read_file == NULL) {
-		perror("ed: create_empty_file");
-		exit(EXIT_FAILURE);
-	}
-
-	return read_file;
+	return create_file;
 }
 
 /* Read lines from file 'fname', store in dest */
@@ -216,6 +213,7 @@ void print_line(struct line *line)
 void destroy_chars(struct character *chars)
 {
 	struct character *tmp;
+
 	while (chars != NULL) {
 		tmp = chars->next;
 		free(chars);
@@ -232,6 +230,7 @@ void destroy_line(struct line *line)
 void destroy_lines(struct line *lines)
 {
 	struct line *tmp;
+
 	while (lines != NULL) {
 		tmp = lines->next;
 		destroy_line(lines);
@@ -257,6 +256,7 @@ void lines_to_handle(FILE *file, struct line *lines)
 void write_lines(const char *fname, struct line *lines)
 {
 	FILE *file = fopen(fname, "w");
+
 	if (file == NULL) {
 		perror("ed");
 		exit(EXIT_FAILURE);
@@ -266,18 +266,15 @@ void write_lines(const char *fname, struct line *lines)
 	(void) fclose(file);
 }
 
-/* Set to 1 by the signal handler if (ctrl+c) is hit. This stops the insertion loop.
- * Note: sig_atomic_t (despite it's name) is not atomic.
- */
-sig_atomic_t stop_insertion;
-
 void insert_line(struct line **start, struct line **line)
 {
+	struct line *new_line;
+	char *buffer;
+	size_t buffer_size;
+
 	stop_insertion = 0;
 	while (!stop_insertion) {
-		struct line *new_line = ALLOC_LL(struct line *);
-		char *buffer;
-		size_t buffer_size;
+		new_line = ALLOC_LL(struct line *);
 
 		buffer = NULL;
 		if (getline(&buffer, &buffer_size, stdin) < 0) {
@@ -319,11 +316,11 @@ void insert_line(struct line **start, struct line **line)
 
 struct line *delete_line(struct line **start, struct line *line)
 {
+	struct line *ret;
+
 	if (line == NULL) {
 		return NULL;
 	}
-
-	struct line *ret;
 
 	/* If first line, move the start of the buffer to the next line */
 	if (*start == line) {
@@ -422,6 +419,14 @@ void remove_last_char(char **s)
 
 int main(int argc, char **argv)
 {
+	const char *FILE_NAME = (const char *) argv[1];
+	struct line *lines;
+	struct line *start;
+	
+	char *input;
+	size_t input_size;
+	ssize_t getline_ret;
+
 	if (argc != 2) {
 		usage();
 		exit(EXIT_FAILURE);
@@ -431,14 +436,6 @@ int main(int argc, char **argv)
 
 	remove_last_char(&argv[1]);
 	
-	const char *FILE_NAME = (const char *) argv[1];
-	struct line *lines;
-	struct line *start;
-
-	char *input;
-	size_t input_size;
-	ssize_t getline_ret;
-
 	read_lines(FILE_NAME, &lines);
 	start = lines;
 
