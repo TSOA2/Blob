@@ -8,25 +8,6 @@
 
 const char *PROMPT = ": ";
 
-void *MALLOC(size_t s)
-{
-	void *ret = malloc(s);
-	if (ret == NULL) {
-		perror("ed: malloc\n");
-		exit(EXIT_FAILURE);
-	}
-	return ret;
-}
-
-/* Macros for linked list appending, allocating */
-#define ALLOC_LL(t) (t) MALLOC(sizeof(t));
-#define APPEND_LL(x) \
-	do { \
-		x->next = ALLOC_LL(typeof(x)); \
-		x->next->prev = x; \
-		x->next->next = NULL; \
-	} while (0);
-
 struct character {
 	unsigned char c;
 	struct character *next;
@@ -38,6 +19,25 @@ struct line {
 	struct line *next;
 	struct line *prev;
 };
+
+void *MALLOC(size_t s)
+{
+	void *ret = malloc(s);
+	if (ret == NULL) {
+		perror("ed: malloc\n");
+		exit(EXIT_FAILURE);
+	}
+	return ret;
+}
+
+/* Macros for linked list appending, allocating */
+#define ALLOC_LL(t) (t *) MALLOC(sizeof(t));
+#define APPEND_LL(x) \
+	do { \
+		x->next = ALLOC_LL(typeof(*x)); \
+		x->next->prev = x; \
+		x->next->next = NULL; \
+	} while (0);
 
 /* Set to 1 by the signal handler if (ctrl+c) is hit. This stops the insertion loop.
  * Note: sig_atomic_t (despite it's name) is not atomic.
@@ -69,7 +69,7 @@ void charray_to_line(struct line *dest, char *src)
 	struct character *chars;
 	struct character *idx;
 
-	chars = ALLOC_LL(struct character *);
+	chars = ALLOC_LL(struct character);
 	idx = chars;
 
 	for (; *src != '\n' && *src != '\0'; src++) {
@@ -156,7 +156,7 @@ void read_lines(const char *fname, struct line **dest)
 		}
 	}
 
-	*dest = ALLOC_LL(struct line *);
+	*dest = ALLOC_LL(struct line);
 	(*dest)->prev = NULL;
 	(*dest)->next = NULL;
 	idx = *dest;
@@ -274,7 +274,7 @@ void insert_line(struct line **start, struct line **line)
 
 	stop_insertion = 0;
 	while (!stop_insertion) {
-		new_line = ALLOC_LL(struct line *);
+		new_line = ALLOC_LL(struct line);
 
 		buffer = NULL;
 		if (getline(&buffer, &buffer_size, stdin) < 0) {
@@ -286,6 +286,7 @@ void insert_line(struct line **start, struct line **line)
 		/* Even if (ctrl+c) is hit, we won't know, if we are waiting for input */
 		if (stop_insertion) {
 			free(buffer);
+			free(new_line); /* No use of destroy_line() b/c there is no character ll inside */
 			break;
 		}
 
@@ -444,6 +445,7 @@ int main(int argc, char **argv)
 		(void) fputs(PROMPT, stdout);
 		getline_ret = getline(&input, &input_size, stdin);
 		if (getline_ret < 0) {
+			destroy_lines(start);
 			free(input);
 			exit(EXIT_FAILURE);
 		}
